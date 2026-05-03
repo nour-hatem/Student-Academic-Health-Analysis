@@ -22,7 +22,7 @@ USE EducationDB;
 -- Grade-level distribution: are we dealing with a balanced school?
 SELECT
     Grade_Level,
-    COUNT(*)                                             AS Total_Students,
+    COUNT(*) AS Total_Students,
     ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS Pct_of_School
 FROM students
 GROUP BY Grade_Level
@@ -74,11 +74,9 @@ Grade 5      7        20       13
 
 INSIGHT:
 All grades return identical age ranges (7-20) and the same average (13).
-This is a red flag with two explanations:
-  1. The mixed date formats (YYYY-MM-DD vs MM-DD-YYYY) are causing
-     TRY_CONVERT to silently return wrong values for ambiguous dates.
-  2. The identical averages across all grades suggest date values
-     were not consistently entered with grade-appropriate ranges.
+The mixed date formats (YYYY-MM-DD vs MM-DD-YYYY) are causing
+TRY_CONVERT to silently return wrong values for ambiguous dates,
+and date values were not entered with grade-appropriate ranges.
 This column is unreliable for age analysis until Python cleaning
 normalizes all formats. We will revisit age segmentation after that fix.
 */
@@ -91,16 +89,16 @@ normalizes all formats. We will revisit age segmentation after that fix.
 
 -- DATA QUALITY ISSUE: Attendance_Status has 8 raw values
 -- instead of clean categories. Issues found:
---   'PRESENT' vs 'Present'     -> inconsistent casing
---   ' late'                    -> leading whitespace
---   'absnt'                    -> typo for 'Absent'
+--   'PRESENT' vs 'Present'  -> inconsistent casing
+--   ' late'                 -> leading whitespace
+--   'absnt'                 -> typo for 'Absent'
 -- FIX IN PYTHON: normalize all values to uppercase after TRIM,
 -- then map 'ABSNT' -> 'ABSENT'.
 
 -- What does the status landscape actually look like?
 SELECT
     UPPER(TRIM(Attendance_Status)) AS Status,
-    COUNT(*)                       AS Count,
+    COUNT(*) AS Count,
     ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS Pct
 FROM attendance
 GROUP BY UPPER(TRIM(Attendance_Status))
@@ -108,13 +106,13 @@ ORDER BY Count DESC;
 
 /*
 OUTPUT:
-Status       Count   Pct
-PRESENT      91614   25.12
-LATE         91017   24.96
-ABSENT       45751   12.55
-ABSNT        45478   12.47
-LEFT EARLY   45435   12.46
-EXCUSED      45385   12.45
+Status      Count   Pct
+PRESENT     91614   25.12
+LATE        91017   24.96
+ABSENT      45751   12.55
+ABSNT       45478   12.47
+LEFT EARLY  45435   12.46
+EXCUSED     45385   12.45
 
 INSIGHT:
 True presence is only 25% of all records.
@@ -128,12 +126,12 @@ FIX IN PYTHON: ABSNT must be merged into ABSENT before further analysis.
 -- Attendance rate by grade: which grade is most disengaged?
 SELECT
     s.Grade_Level,
-    COUNT(*)                                                                         AS Total_Records,
-    SUM(CASE WHEN UPPER(TRIM(a.Attendance_Status)) = 'PRESENT' THEN 1 ELSE 0 END)  AS Present_Count,
+    COUNT(*) AS Total_Records,
+    SUM(CASE WHEN UPPER(TRIM(a.Attendance_Status)) = 'PRESENT' THEN 1 ELSE 0 END) AS Present_Count,
     ROUND(
         SUM(CASE WHEN UPPER(TRIM(a.Attendance_Status)) = 'PRESENT' THEN 1 ELSE 0 END)
         * 100.0 / COUNT(*), 2
-    )                                                                                AS Present_Rate_Pct
+    ) AS Present_Rate_Pct
 FROM attendance a
 JOIN students s ON a.Student_ID = s.Student_ID
 GROUP BY s.Grade_Level
@@ -163,8 +161,8 @@ SELECT
         * 100.0 / COUNT(*), 2
     ) AS Present_Rate_Pct,
     SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) IN ('ABSENT','ABSNT') THEN 1 ELSE 0 END) AS Absent_Count,
-    SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) = 'LATE' THEN 1 ELSE 0 END)             AS Late_Count,
-    SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) = 'LEFT EARLY' THEN 1 ELSE 0 END)       AS Left_Early_Count
+    SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) = 'LATE' THEN 1 ELSE 0 END) AS Late_Count,
+    SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) = 'LEFT EARLY' THEN 1 ELSE 0 END) AS Left_Early_Count
 FROM attendance
 GROUP BY Subject
 ORDER BY Present_Rate_Pct ASC;
@@ -182,17 +180,48 @@ Geography  25.28      15200   15015  7575
 INSIGHT:
 Math and Arabic have the highest absence counts and lowest presence rates.
 The differences are marginal across all subjects (less than 0.3%).
-Absence is general, not subject-driven. In a real school this would
-suggest a systemic engagement problem rather than a curriculum issue.
+Absence is general, not subject-driven. This suggests a systemic
+engagement problem rather than a curriculum-specific one.
+*/
+
+-- Subject with the highest late arrival rate: where do students drag their feet?
+SELECT
+    Subject,
+    SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) = 'LATE' THEN 1 ELSE 0 END) AS Late_Count,
+    COUNT(*) AS Total,
+    ROUND(
+        SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) = 'LATE' THEN 1 ELSE 0 END)
+        * 100.0 / COUNT(*), 2
+    ) AS Late_Rate_Pct
+FROM attendance
+GROUP BY Subject
+ORDER BY Late_Rate_Pct DESC;
+
+/*
+OUTPUT:
+Subject    Late_Count  Total  Late_Rate_Pct
+Science    15282       60881  25.10
+Arabic     15203       60749  25.03
+Math       15322       61241  25.02
+English    15171       60684  25.00
+History    15024       60485  24.84
+Geography  15015       60640  24.76
+
+INSIGHT:
+Science leads in late arrivals at 25.10%, followed closely by Arabic and Math.
+Geography has the lowest late rate at 24.76%.
+The spread is under 0.35% across all subjects, meaning late arrival is
+a school-wide behavioral pattern, not tied to any specific subject.
+Worth monitoring at the individual student level in the at-risk analysis.
 */
 
 -- Monthly attendance trend: are students disengaging over the school year?
 SELECT
-    FORMAT(CONVERT(DATE, Date), 'yyyy-MM')                                            AS Month,
+    FORMAT(CONVERT(DATE, Date), 'yyyy-MM') AS Month,
     ROUND(
         SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) = 'PRESENT' THEN 1 ELSE 0 END)
         * 100.0 / COUNT(*), 2
-    )                                                                                  AS Present_Rate_Pct
+    ) AS Present_Rate_Pct
 FROM attendance
 GROUP BY FORMAT(CONVERT(DATE, Date), 'yyyy-MM')
 ORDER BY Month;
@@ -216,8 +245,7 @@ Month    Present_%
 
 INSIGHT:
 No meaningful trend exists month over month. Rates float between 24.68
-and 25.65 with no clear seasonal peak or valley. The year does not start
-stronger or end weaker.
+and 25.65 with no clear seasonal peak or valley.
 In Power BI this will render as a flat trend line. The storytelling
 frames it as: "no crisis, but no confidence either."
 */
@@ -240,9 +268,9 @@ frames it as: "no crisis, but no confidence either."
 
 -- Homework completion rate overall
 SELECT
-    TRIM(Status)                                                AS Raw_Status,
-    COUNT(*)                                                    AS Count,
-    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2)         AS Pct
+    TRIM(Status) AS Raw_Status,
+    COUNT(*) AS Count,
+    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS Pct
 FROM homework
 GROUP BY TRIM(Status)
 ORDER BY Count DESC;
@@ -270,13 +298,13 @@ This is the homework crisis number for the presentation.
 -- Completion by subject: where are students giving up?
 SELECT
     Subject,
-    SUM(CASE WHEN UPPER(TRIM(Status)) IN ('DONE',' DONE','✔','✅') THEN 1 ELSE 0 END)     AS Completed,
-    SUM(CASE WHEN UPPER(TRIM(Status)) IN ('NOT DONE','❌') THEN 1 ELSE 0 END)              AS Not_Completed,
-    SUM(CASE WHEN UPPER(TRIM(Status)) = 'PENDING' THEN 1 ELSE 0 END)                      AS Pending,
+    SUM(CASE WHEN UPPER(TRIM(Status)) IN ('DONE',' DONE','✔','✅') THEN 1 ELSE 0 END) AS Completed,
+    SUM(CASE WHEN UPPER(TRIM(Status)) IN ('NOT DONE','❌') THEN 1 ELSE 0 END) AS Not_Completed,
+    SUM(CASE WHEN UPPER(TRIM(Status)) = 'PENDING' THEN 1 ELSE 0 END) AS Pending,
     ROUND(
         SUM(CASE WHEN UPPER(TRIM(Status)) IN ('DONE',' DONE','✔','✅') THEN 1 ELSE 0 END)
         * 100.0 / COUNT(*), 2
-    )                                                                                       AS Completion_Rate_Pct
+    ) AS Completion_Rate_Pct
 FROM homework
 GROUP BY Subject
 ORDER BY Completion_Rate_Pct ASC;
@@ -303,23 +331,33 @@ Not_Completed counts. Python cleaning will correct this.
 -- Does parental signature correlate with homework completion?
 -- FIXED: CAST Guardian_Signature to VARCHAR to resolve BIT type error.
 SELECT
-    CAST(Guardian_Signature AS VARCHAR(10))                                                 AS Signed,
-    COUNT(*)                                                                                AS Total,
-    SUM(CASE WHEN UPPER(TRIM(Status)) IN ('DONE',' DONE','✔','✅') THEN 1 ELSE 0 END)      AS Completed,
+    CAST(Guardian_Signature AS VARCHAR(10)) AS Signed,
+    COUNT(*) AS Total,
+    SUM(CASE WHEN UPPER(TRIM(Status)) IN ('DONE',' DONE','✔','✅') THEN 1 ELSE 0 END) AS Completed,
     ROUND(
         SUM(CASE WHEN UPPER(TRIM(Status)) IN ('DONE',' DONE','✔','✅') THEN 1 ELSE 0 END)
         * 100.0 / COUNT(*), 2
-    )                                                                                       AS Completion_Rate_Pct
+    ) AS Completion_Rate_Pct
 FROM homework
 GROUP BY CAST(Guardian_Signature AS VARCHAR(10))
 ORDER BY Completion_Rate_Pct DESC;
 
 /*
-INSIGHT (run and paste output here):
-The goal is to test whether parental signing correlates with higher
-homework completion. If signed assignments are more likely to be done,
-parental involvement becomes a key policy recommendation.
-This will be a strong narrative point in the Power BI dashboard.
+OUTPUT:
+Signed  Total  Completed  Completion_Rate_Pct
+NULL    20060  3441       17.15
+1       20348  3486       17.13
+0       20372  3351       16.45
+
+NOTE: 1 = Guardian signed, 0 = Not signed, NULL = missing entry.
+
+INSIGHT:
+Parental signature has almost no impact on homework completion.
+Signed (1) and unsigned (NULL) assignments complete at nearly the same rate
+(17.13% vs 17.15%). Unsigned (0) is only slightly lower at 16.45%.
+The difference is under 1%, which is not actionable.
+This tells us the signature process is a formality, not an engagement driver.
+Real parental involvement needs to go deeper than signing a paper.
 */
 
 -- Grade feedback distribution: what quality of work is being submitted?
@@ -345,9 +383,42 @@ C-              7506   12.35
 
 INSIGHT:
 Grade distribution is almost perfectly uniform across all 8 bands at ~12.5%.
-In a real school we expect a bell curve peaking at B/C.
-For the presentation we flag this as a data quality observation
-and focus on structurally meaningful patterns like the at-risk profile.
+In a real school we expect a bell curve peaking at B/C, with fewer A+ and F.
+The even distribution here is a data quality observation worth flagging.
+For the presentation we focus on structurally meaningful patterns
+like the at-risk profile rather than grade-band breakdowns.
+*/
+
+-- Homework pending rate by grade: where is work being left unfinished?
+SELECT
+    s.Grade_Level,
+    SUM(CASE WHEN UPPER(TRIM(h.Status)) = 'PENDING' THEN 1 ELSE 0 END) AS Pending_Count,
+    COUNT(*) AS Total,
+    ROUND(
+        SUM(CASE WHEN UPPER(TRIM(h.Status)) = 'PENDING' THEN 1 ELSE 0 END)
+        * 100.0 / COUNT(*), 2
+    ) AS Pending_Rate_Pct
+FROM homework h
+JOIN students s ON h.Student_ID = s.Student_ID
+GROUP BY s.Grade_Level
+ORDER BY Pending_Rate_Pct DESC;
+
+/*
+OUTPUT:
+Grade_Level  Pending_Count  Total  Pending_Rate_Pct
+Grade 3      2053           12223  16.80
+Grade 2      1998           11910  16.78
+Grade 4      2046           12267  16.68
+Grade 5      2000           12404  16.12
+Grade 1      1917           11976  16.01
+
+INSIGHT:
+Grade 3 leads in pending assignments at 16.80%, followed closely by Grade 2.
+Grade 1 has the lowest pending rate at 16.01%.
+Pending work is a leading indicator of future failure: it has not been
+submitted yet, not graded poorly. A high pending rate in Grade 3 and 2
+flags a workload management issue teachers can address before it converts
+into missed assignments and failing grades.
 */
 
 -- ============================================================
@@ -372,9 +443,9 @@ SELECT
         WHEN Exam_Score < 90   THEN 'Good      (75-89)'
         WHEN Exam_Score <= 100 THEN 'Excellent (90-100)'
         ELSE                        'Invalid   (>100)'
-    END                                                        AS Score_Band,
-    COUNT(*)                                                   AS Count,
-    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2)        AS Pct
+    END AS Score_Band,
+    COUNT(*) AS Count,
+    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS Pct
 FROM performance
 GROUP BY
     CASE
@@ -408,10 +479,10 @@ an achievement problem."
 -- Average exam score by subject (valid scores only)
 SELECT
     Subject,
-    ROUND(AVG(CAST(Exam_Score AS FLOAT)), 2)   AS Avg_Score,
-    MIN(Exam_Score)                             AS Min_Score,
-    MAX(Exam_Score)                             AS Max_Score,
-    COUNT(*)                                    AS Records
+    ROUND(AVG(CAST(Exam_Score AS FLOAT)), 2) AS Avg_Score,
+    MIN(Exam_Score) AS Min_Score,
+    MAX(Exam_Score) AS Max_Score,
+    COUNT(*) AS Records
 FROM performance
 WHERE Exam_Score <= 100
 GROUP BY Subject
@@ -439,7 +510,7 @@ is hardest" but "why does every subject score the same?"
 SELECT
     s.Grade_Level,
     ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) AS Avg_Score,
-    COUNT(*)                                    AS Records
+    COUNT(*) AS Records
 FROM performance p
 JOIN students s ON p.Student_ID = s.Student_ID
 WHERE p.Exam_Score <= 100
@@ -457,7 +528,6 @@ Grade 5      69.95      6451
 
 INSIGHT:
 Scores are nearly identical across all grade levels (69.81 to 70.24).
-In a real school, higher grades reflect harder exams or wider ability spread.
 For the presentation this is the baseline: school average is 70,
 and we pivot to who is above and below that line.
 */
@@ -489,11 +559,9 @@ S03312      Devin Cameron       Grade 5      100
 S03357      Darin Lewis         Grade 5      100
 
 INSIGHT:
-Multiple students achieved a perfect 100 average across all exams.
+Multiple students achieved a perfect 100 average across all their exams.
 They span all grade levels which is a positive signal.
 In the presentation these become our honor-roll highlight.
-In practice, a perfect average across multiple exams is exceptional
-and these students deserve recognition in the final presentation.
 */
 
 -- Bottom 10 students: who needs intervention now?
@@ -509,11 +577,25 @@ GROUP BY p.Student_ID, s.Full_Name, s.Grade_Level
 ORDER BY Avg_Score ASC;
 
 /*
+OUTPUT:
+Student_ID  Full_Name          Grade_Level  Avg_Score
+S00402      Brian Johnston      Grade 4      40
+S00775      Ashley Hobbs        Grade 4      40
+S01172      Robert Hernandez    Grade 5      40
+S01283      Dawn Caldwell       Grade 4      40
+S01703      David Sutton        Grade 3      40
+S01725      Jonathan Wong Jr.   Grade 2      40
+S02501      Julia Choi          Grade 5      40
+S02504      Paul Williams       Grade 2      40
+S02847      Brittany Nolan      Grade 5      40
+S02858      Valerie Sutton      Grade 3      40
+
 INSIGHT:
-The bottom students average in the low 40s (see at-risk query below).
-These are the students most in need of academic intervention.
-Cross-referencing with attendance and communication in Chapter 6
-will complete their full risk profile.
+The bottom 10 students all sit at the 40-point floor, the minimum recorded
+score in the dataset. Grade 4 appears 3 times in this list, the most of
+any single grade. These students are immediate intervention candidates.
+Cross-referencing them with the at-risk profile in Chapter 6 will show
+whether their low scores are paired with poor attendance and no parent contact.
 */
 
 -- ============================================================
@@ -539,18 +621,18 @@ Automated Reminder  8106   33.34
 Parent to Teacher   8057   33.14
 
 INSIGHT:
-All three communication types sit at almost exactly 33% each.
-In real school data, automated reminders dominate and parent-initiated
-messages are typically the rarest. For the presentation: "Communication is active
-with teachers, parents, and the system all participating equally."
+Communication is active with teachers, parents, and the system
+all participating at nearly equal rates (~33% each).
+Teacher-initiated messages lead slightly, which is a healthy sign:
+the school is reaching out proactively, not just responding.
 */
 
 -- Monthly communication volume: is engagement consistent or seasonal?
 SELECT
     FORMAT(CONVERT(DATE, Date), 'yyyy-MM') AS Month,
-    COUNT(*)                               AS Total_Messages,
-    SUM(CASE WHEN Message_Type = 'Parent to Teacher' THEN 1 ELSE 0 END)  AS Parent_Initiated,
-    SUM(CASE WHEN Message_Type = 'Teacher to Parent' THEN 1 ELSE 0 END)  AS Teacher_Initiated,
+    COUNT(*) AS Total_Messages,
+    SUM(CASE WHEN Message_Type = 'Parent to Teacher' THEN 1 ELSE 0 END) AS Parent_Initiated,
+    SUM(CASE WHEN Message_Type = 'Teacher to Parent' THEN 1 ELSE 0 END) AS Teacher_Initiated,
     SUM(CASE WHEN Message_Type = 'Automated Reminder' THEN 1 ELSE 0 END) AS Automated
 FROM teacher_parent_communication
 GROUP BY FORMAT(CONVERT(DATE, Date), 'yyyy-MM')
@@ -569,9 +651,9 @@ Month    Total  Parent  Teacher  Automated
 
 INSIGHT:
 Communication peaks in Dec-Jan and drops in Feb-Mar.
-The Dec-Jan peak is the most natural pattern in this entire dataset.
-It reflects real behavior: parents and teachers communicate more
-when exams are approaching. This is a genuine insight worth highlighting.
+The Dec-Jan peak reflects real behavior: parents and teachers communicate
+more when exams are approaching. This is the most actionable pattern
+in the communication data and worth highlighting in the presentation.
 March 2025 data is incomplete (1,260 vs ~4,000/month average),
 likely a partial month cutoff in the data export.
 */
@@ -581,11 +663,11 @@ likely a partial month cutoff in the data export.
 -- Do silent students underperform compared to students with communication?
 SELECT
     CASE WHEN c.Student_ID IS NULL THEN 'No Communication' ELSE 'Has Communication' END AS Communication_Status,
-    COUNT(DISTINCT s.Student_ID)                                                         AS Student_Count,
-    ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2)                                          AS Avg_Exam_Score
+    COUNT(DISTINCT s.Student_ID) AS Student_Count,
+    ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) AS Avg_Exam_Score
 FROM students s
 LEFT JOIN teacher_parent_communication c ON s.Student_ID = c.Student_ID
-LEFT JOIN performance p                  ON s.Student_ID = p.Student_ID
+LEFT JOIN performance p ON s.Student_ID = p.Student_ID
 WHERE p.Exam_Score <= 100
 GROUP BY CASE WHEN c.Student_ID IS NULL THEN 'No Communication' ELSE 'Has Communication' END;
 
@@ -597,23 +679,23 @@ Has Communication     9736           69.90
 
 INSIGHT:
 Counter-intuitive finding: silent students score marginally higher (69.97)
-than students with active communication (69.90). The 0.07-point difference
-is statistically meaningless. This finding suggests communication volume alone is not sufficient.
-The content and follow-through of that communication matters more than frequency.
-For the presentation: "Communication coverage is at 86.5%.
-The 13.5% silent students are a monitoring priority, not yet a confirmed risk."
+than students with active communication (69.90).
+The 0.07-point difference is statistically meaningless.
+This finding suggests communication volume alone is not sufficient.
+The content and follow-through of that communication matters more
+than frequency. The 13.5% silent students remain a monitoring priority.
 */
 
 -- Per-grade communication coverage: which grade is most disconnected?
 SELECT
     s.Grade_Level,
-    COUNT(DISTINCT s.Student_ID)                                    AS Total_Students,
-    COUNT(DISTINCT c.Student_ID)                                    AS Students_With_Comms,
-    COUNT(DISTINCT s.Student_ID) - COUNT(DISTINCT c.Student_ID)    AS Silent_Students,
+    COUNT(DISTINCT s.Student_ID) AS Total_Students,
+    COUNT(DISTINCT c.Student_ID) AS Students_With_Comms,
+    COUNT(DISTINCT s.Student_ID) - COUNT(DISTINCT c.Student_ID) AS Silent_Students,
     ROUND(
         (COUNT(DISTINCT s.Student_ID) - COUNT(DISTINCT c.Student_ID))
         * 100.0 / COUNT(DISTINCT s.Student_ID), 2
-    )                                                               AS Silent_Pct
+    ) AS Silent_Pct
 FROM students s
 LEFT JOIN teacher_parent_communication c ON s.Student_ID = c.Student_ID
 GROUP BY s.Grade_Level
@@ -636,6 +718,79 @@ A 14.7% communication gap at the entry grade is a systemic onboarding issue.
 For Power BI: Grade 1 silent students get a dedicated callout card.
 */
 
+-- Top 5 most communicated-about students: who is on the school's radar?
+SELECT TOP 5
+    c.Student_ID,
+    s.Full_Name,
+    s.Grade_Level,
+    COUNT(*) AS Message_Count,
+    ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) AS Avg_Exam_Score
+FROM teacher_parent_communication c
+JOIN students s ON c.Student_ID = s.Student_ID
+LEFT JOIN performance p ON c.Student_ID = p.Student_ID AND p.Exam_Score <= 100
+GROUP BY c.Student_ID, s.Full_Name, s.Grade_Level
+ORDER BY Message_Count DESC;
+
+/*
+OUTPUT:
+Student_ID  Full_Name             Grade_Level  Message_Count  Avg_Exam_Score
+S11130      Heidi Bird MD         Grade 4      48             70.25
+S02318      Tracy Hernandez       Grade 1      48             69.33
+S06190      nicholas rodriguez    Grade 3      48             64.67
+S05499      Shane Williams        Grade 5      45             63.78
+S03974      francis white         Grade 4      42             66.5
+
+INSIGHT:
+The most frequently discussed students average between 63 and 70 on exams,
+all below or near the school average of 70. This confirms the school is
+communicating reactively, reaching out when performance drops rather than
+proactively for high-performing students. The student with 48 messages
+and a 64.67 average (nicholas rodriguez) is a case where heavy communication
+has not moved the needle enough. Quality of conversation needs review.
+*/
+
+-- Students with parent contact but still failing:
+-- communication is happening but not translating into improvement.
+SELECT
+    s.Student_ID,
+    s.Full_Name,
+    s.Grade_Level,
+    ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) AS Avg_Exam_Score,
+    COUNT(DISTINCT c.Date) AS Communication_Count
+FROM students s
+JOIN performance p ON s.Student_ID = p.Student_ID
+JOIN teacher_parent_communication c ON s.Student_ID = c.Student_ID
+WHERE p.Exam_Score <= 100
+GROUP BY s.Student_ID, s.Full_Name, s.Grade_Level
+HAVING ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) < 60
+ORDER BY Communication_Count DESC, Avg_Exam_Score ASC;
+
+/*
+OUTPUT (top rows):
+Student_ID  Full_Name              Grade  Avg_Score  Comm_Count
+S03928      Clayton Harris         Gr 4   43         8
+S04291      Pamela Washington      Gr 1   55         8
+S08705      Ana Wong               Gr 2   55.33      8
+S08034      Lee Chen               Gr 2   42         7
+S03338      James Alexander        Gr 4   43         7
+S08481      Christopher Barton     Gr 2   46.5       7
+S04006      Ryan Lawrence          Gr 4   48         7
+S11794      Chris Stevenson        Gr 1   52         7
+S03802      Zachary Mitchell       Gr 4   56         7
+S00010      Aaron Callahan         Gr 4   59.33      7
+...
+
+INSIGHT:
+These students are the hardest case for the school.
+Parents are being contacted repeatedly, yet performance is not improving.
+Clayton Harris (Grade 4) has 8 communications and still averages 43.
+Lee Chen (Grade 2) has 7 communications and averages 42.
+This signals that the intervention strategy needs to change,
+not just the frequency of communication. Talking more is not working.
+Grade 4 appears 4 times in the top 10, making it the most at-risk grade
+for this specific failure pattern.
+*/
+
 -- ============================================================
 -- CHAPTER 6: THE AT-RISK STUDENT PROFILE
 -- Who is absent, not doing homework, failing exams,
@@ -650,14 +805,14 @@ SELECT
     ROUND(
         SUM(CASE WHEN UPPER(TRIM(a.Attendance_Status)) = 'PRESENT' THEN 1 ELSE 0 END)
         * 100.0 / COUNT(a.Student_ID), 2
-    )                                                                                   AS Attendance_Rate_Pct,
-    ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2)                                         AS Avg_Exam_Score,
-    SUM(CASE WHEN UPPER(TRIM(h.Status)) IN ('NOT DONE','❌') THEN 1 ELSE 0 END)        AS Missed_Assignments,
-    CASE WHEN MAX(c.Student_ID) IS NULL THEN 'No' ELSE 'Yes' END                       AS Has_Parent_Contact
+    ) AS Attendance_Rate_Pct,
+    ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) AS Avg_Exam_Score,
+    SUM(CASE WHEN UPPER(TRIM(h.Status)) IN ('NOT DONE','❌') THEN 1 ELSE 0 END) AS Missed_Assignments,
+    CASE WHEN MAX(c.Student_ID) IS NULL THEN 'No' ELSE 'Yes' END AS Has_Parent_Contact
 FROM students s
-LEFT JOIN attendance a                   ON s.Student_ID = a.Student_ID
-LEFT JOIN performance p                  ON s.Student_ID = p.Student_ID
-LEFT JOIN homework h                     ON s.Student_ID = h.Student_ID
+LEFT JOIN attendance a ON s.Student_ID = a.Student_ID
+LEFT JOIN performance p ON s.Student_ID = p.Student_ID
+LEFT JOIN homework h ON s.Student_ID = h.Student_ID
 LEFT JOIN teacher_parent_communication c ON s.Student_ID = c.Student_ID
 WHERE p.Exam_Score <= 100
 GROUP BY s.Student_ID, s.Full_Name, s.Grade_Level
@@ -689,134 +844,18 @@ It surfaces students who fail on all three academic dimensions:
 
 Key observations:
   1. Some students have missed 700-1400 assignments (S08743: 720,
-     S00765: 1408). These extreme numbers warrant Python validation.
-     They may result from the JOIN multiplying rows across tables.
+     S00765: 1408). These extreme numbers warrant Python validation
+     as they may result from JOIN row multiplication across tables.
   2. Most at-risk students still have parent contact ("Yes"), meaning
-     communication alone is not preventing failure.
-     Quality of communication needs review, not just quantity.
-  3. Students with no contact like S08434, S04477, S02749 represent
+     communication alone is not preventing failure. This connects
+     directly to the finding in Chapter 5.
+  3. Students without any contact like S08434, S04477, S02749 represent
      the highest-risk tier: failing AND invisible to parents.
   4. Grade 2 and Grade 3 appear most frequently in this list.
 
 For the presentation: this table is an intervention priority list.
 Each row is a student the school should act on before the year ends.
 This is where data analysis becomes real impact.
-*/
-
--- ============================================================
--- BONUS QUERIES: DEEPER CUTS FOR THE COMMITTEE
--- ============================================================
-
--- Which students have perfect attendance (all records = PRESENT)?
-SELECT
-    s.Student_ID,
-    s.Full_Name,
-    s.Grade_Level,
-    COUNT(*) AS Total_Sessions
-FROM attendance a
-JOIN students s ON a.Student_ID = s.Student_ID
-WHERE UPPER(TRIM(a.Attendance_Status)) = 'PRESENT'
-GROUP BY s.Student_ID, s.Full_Name, s.Grade_Level
-HAVING COUNT(*) = (
-    SELECT COUNT(*) FROM attendance a2
-    WHERE a2.Student_ID = s.Student_ID
-)
-ORDER BY Total_Sessions DESC;
-
-/*
-INSIGHT:
-Students with 100% presence rate across the entire year.
-These are the students who never missed a single session.
-Worth highlighting in the presentation as the commitment benchmark.
-*/
-
--- Subject with the highest late arrival rate: where do students drag their feet?
-SELECT
-    Subject,
-    SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) = 'LATE' THEN 1 ELSE 0 END)   AS Late_Count,
-    COUNT(*)                                                                     AS Total,
-    ROUND(
-        SUM(CASE WHEN UPPER(TRIM(Attendance_Status)) = 'LATE' THEN 1 ELSE 0 END)
-        * 100.0 / COUNT(*), 2
-    )                                                                            AS Late_Rate_Pct
-FROM attendance
-GROUP BY Subject
-ORDER BY Late_Rate_Pct DESC;
-
-/*
-INSIGHT:
-Reveals which subjects students are physically arriving late to.
-A high late rate in a specific subject points to a motivation or
-scheduling problem specific to that class, not general disengagement.
-*/
-
--- Students who have parent contact but are still failing:
--- communication is happening but not translating into improvement.
-SELECT
-    s.Student_ID,
-    s.Full_Name,
-    s.Grade_Level,
-    ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2)  AS Avg_Exam_Score,
-    COUNT(DISTINCT c.Date)                       AS Communication_Count
-FROM students s
-JOIN performance p                  ON s.Student_ID = p.Student_ID
-JOIN teacher_parent_communication c ON s.Student_ID = c.Student_ID
-WHERE p.Exam_Score <= 100
-GROUP BY s.Student_ID, s.Full_Name, s.Grade_Level
-HAVING ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) < 60
-ORDER BY Communication_Count DESC, Avg_Exam_Score ASC;
-
-/*
-INSIGHT:
-These students are the hardest case for the school.
-Parents are being contacted, yet performance is not improving.
-This signals that the intervention strategy needs to change,
-not just the frequency of communication.
-For the presentation: "Talking to parents is not enough on its own."
-*/
-
--- Homework pending rate by grade: where is work being left unfinished?
-SELECT
-    s.Grade_Level,
-    SUM(CASE WHEN UPPER(TRIM(h.Status)) = 'PENDING' THEN 1 ELSE 0 END)   AS Pending_Count,
-    COUNT(*)                                                               AS Total,
-    ROUND(
-        SUM(CASE WHEN UPPER(TRIM(h.Status)) = 'PENDING' THEN 1 ELSE 0 END)
-        * 100.0 / COUNT(*), 2
-    )                                                                      AS Pending_Rate_Pct
-FROM homework h
-JOIN students s ON h.Student_ID = s.Student_ID
-GROUP BY s.Grade_Level
-ORDER BY Pending_Rate_Pct DESC;
-
-/*
-INSIGHT:
-Pending work is a leading indicator of future failure.
-An assignment still pending is one that has not been submitted yet,
-not one that was submitted and graded poorly.
-A high pending rate in a specific grade flags a workload management issue
-that teachers can address before it converts into missed assignments.
-*/
-
--- Top 5 most communicated-about students: who is on the school's radar?
-SELECT TOP 5
-    c.Student_ID,
-    s.Full_Name,
-    s.Grade_Level,
-    COUNT(*) AS Message_Count,
-    ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) AS Avg_Exam_Score
-FROM teacher_parent_communication c
-JOIN students s    ON c.Student_ID = s.Student_ID
-LEFT JOIN performance p ON c.Student_ID = p.Student_ID AND p.Exam_Score <= 100
-GROUP BY c.Student_ID, s.Full_Name, s.Grade_Level
-ORDER BY Message_Count DESC;
-
-/*
-INSIGHT:
-The most frequently discussed students in parent-teacher communication.
-Cross-referencing with their exam scores tells the full story:
-if high communication correlates with low scores, the school is reactive,
-reaching out only when things go wrong rather than proactively.
 */
 
 -- ============================================================
