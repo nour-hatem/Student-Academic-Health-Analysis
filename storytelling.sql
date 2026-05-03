@@ -427,33 +427,33 @@ into missed assignments and failing grades.
 -- But only if the numbers themselves are trustworthy.
 -- ============================================================
 
--- DATA QUALITY ISSUE: Exam_Score has 5,139 records above 100 (max = 110).
--- Logically impossible on a standard 100-point scale.
+-- NOTE: Exam_Score range is 40-110. The scale goes up to 110, not 100.
+-- All scores are valid and no capping is applied.
 -- DATA QUALITY ISSUE: Homework_Completion_% has two problems:
 --   1. Mixed formats: some values are '95', others are '95%'.
 --   2. 7,376 records have a value of -5 which is logically invalid.
 -- FIX IN PYTHON: strip the % symbol, cast to numeric,
 --   cap scores at 100, and treat negatives as NULL.
 
--- Exam score distribution: how is the school performing overall?
+-- Exam score distribution across the full valid range (40-110)
 SELECT
     CASE
-        WHEN Exam_Score < 60   THEN 'Failing   (<60)'
-        WHEN Exam_Score < 75   THEN 'Average   (60-74)'
-        WHEN Exam_Score < 90   THEN 'Good      (75-89)'
+        WHEN Exam_Score < 60  THEN 'Failing   (<60)'
+        WHEN Exam_Score < 75  THEN 'Average   (60-74)'
+        WHEN Exam_Score < 90  THEN 'Good      (75-89)'
         WHEN Exam_Score <= 100 THEN 'Excellent (90-100)'
-        ELSE                        'Invalid   (>100)'
+        ELSE                       'High      (101-110)'
     END AS Score_Band,
     COUNT(*) AS Count,
     ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS Pct
 FROM performance
 GROUP BY
     CASE
-        WHEN Exam_Score < 60   THEN 'Failing   (<60)'
-        WHEN Exam_Score < 75   THEN 'Average   (60-74)'
-        WHEN Exam_Score < 90   THEN 'Good      (75-89)'
+        WHEN Exam_Score < 60  THEN 'Failing   (<60)'
+        WHEN Exam_Score < 75  THEN 'Average   (60-74)'
+        WHEN Exam_Score < 90  THEN 'Good      (75-89)'
         WHEN Exam_Score <= 100 THEN 'Excellent (90-100)'
-        ELSE                        'Invalid   (>100)'
+        ELSE                       'High      (101-110)'
     END
 ORDER BY MIN(Exam_Score);
 
@@ -464,19 +464,18 @@ Failing   (<60)    10322  28.30
 Average   (60-74)  7644   20.96
 Good      (75-89)  7732   21.20
 Excellent (90-100) 5631   15.44
-Invalid   (>100)   5139   14.09
+High      (101-110)5139   14.09
 
 INSIGHT:
-28.3% of exam records fall below 60, making Failing the single largest band.
-14% of records are outright invalid (score > 100) and must be excluded.
-Of valid records only 15.44% reach Excellent.
-More students are failing than excelling.
-For the presentation: "1 in 3 exam records is either failing or invalid.
-The school's performance data has a reliability problem before it has
-an achievement problem."
+The score scale runs from 40 to 110. The High band (101-110) is valid.
+28.3% of records fall below 60, making Failing the single largest band.
+Only 15.44% reach the Excellent range. More students are failing than excelling.
+The combined High + Excellent group is ~29.5%, nearly matching the Failing band.
+For the presentation: the school is polarized — a top tier performing above
+standard and a bottom tier that needs urgent intervention.
 */
 
--- Average exam score by subject (valid scores only)
+-- Average exam score by subject (full range)
 SELECT
     Subject,
     ROUND(AVG(CAST(Exam_Score AS FLOAT)), 2) AS Avg_Score,
@@ -484,7 +483,6 @@ SELECT
     MAX(Exam_Score) AS Max_Score,
     COUNT(*) AS Records
 FROM performance
-WHERE Exam_Score <= 100
 GROUP BY Subject
 ORDER BY Avg_Score ASC;
 
@@ -513,7 +511,6 @@ SELECT
     COUNT(*) AS Records
 FROM performance p
 JOIN students s ON p.Student_ID = s.Student_ID
-WHERE p.Exam_Score <= 100
 GROUP BY s.Grade_Level
 ORDER BY s.Grade_Level;
 
@@ -540,7 +537,6 @@ SELECT TOP 10
     ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) AS Avg_Score
 FROM performance p
 JOIN students s ON p.Student_ID = s.Student_ID
-WHERE p.Exam_Score <= 100
 GROUP BY p.Student_ID, s.Full_Name, s.Grade_Level
 ORDER BY Avg_Score DESC;
 
@@ -572,7 +568,6 @@ SELECT TOP 10
     ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) AS Avg_Score
 FROM performance p
 JOIN students s ON p.Student_ID = s.Student_ID
-WHERE p.Exam_Score <= 100
 GROUP BY p.Student_ID, s.Full_Name, s.Grade_Level
 ORDER BY Avg_Score ASC;
 
@@ -668,7 +663,6 @@ SELECT
 FROM students s
 LEFT JOIN teacher_parent_communication c ON s.Student_ID = c.Student_ID
 LEFT JOIN performance p ON s.Student_ID = p.Student_ID
-WHERE p.Exam_Score <= 100
 GROUP BY CASE WHEN c.Student_ID IS NULL THEN 'No Communication' ELSE 'Has Communication' END;
 
 /*
@@ -727,7 +721,7 @@ SELECT TOP 5
     ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) AS Avg_Exam_Score
 FROM teacher_parent_communication c
 JOIN students s ON c.Student_ID = s.Student_ID
-LEFT JOIN performance p ON c.Student_ID = p.Student_ID AND p.Exam_Score <= 100
+LEFT JOIN performance p ON c.Student_ID = p.Student_ID 
 GROUP BY c.Student_ID, s.Full_Name, s.Grade_Level
 ORDER BY Message_Count DESC;
 
@@ -760,7 +754,6 @@ SELECT
 FROM students s
 JOIN performance p ON s.Student_ID = p.Student_ID
 JOIN teacher_parent_communication c ON s.Student_ID = c.Student_ID
-WHERE p.Exam_Score <= 100
 GROUP BY s.Student_ID, s.Full_Name, s.Grade_Level
 HAVING ROUND(AVG(CAST(p.Exam_Score AS FLOAT)), 2) < 60
 ORDER BY Communication_Count DESC, Avg_Exam_Score ASC;
@@ -814,7 +807,6 @@ LEFT JOIN attendance a ON s.Student_ID = a.Student_ID
 LEFT JOIN performance p ON s.Student_ID = p.Student_ID
 LEFT JOIN homework h ON s.Student_ID = h.Student_ID
 LEFT JOIN teacher_parent_communication c ON s.Student_ID = c.Student_ID
-WHERE p.Exam_Score <= 100
 GROUP BY s.Student_ID, s.Full_Name, s.Grade_Level
 HAVING
     ROUND(
@@ -867,7 +859,6 @@ This is where data analysis becomes real impact.
 --   3. homework.Status               : emoji encoding + text inconsistency
 --   4. homework.Guardian_Signature   : imported as BIT, blank != NULL
 --   5. performance.Homework_%        : -5 invalid values + mixed % symbol
---   6. performance.Exam_Score        : 5,139 scores above 100 (max 110)
 -- ============================================================
 -- Next phase  : Python for cleaning and transformation
 -- Following   : Power BI dashboards
