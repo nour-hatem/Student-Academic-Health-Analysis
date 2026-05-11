@@ -11,7 +11,7 @@
 
 <br/>
 
-> **Graduation Project — DEPI x NTI Data Analysis Track**  
+> **Graduation Project — NTI Data Analysis Track**  
 > A full end-to-end data analysis pipeline covering 12,156 students across 5 grade levels.  
 > From raw CSV files to a 6-page interactive Power BI dashboard.
 
@@ -39,8 +39,6 @@ Raw CSVs  ──▶  SQL Server (Storytelling)  ──▶  Python (Cleaning)  �
 | `teacher_parent_communication.csv` | 24,312 | Message logs between school and parents |
 
 **Period:** March 2024 – March 2025  
-**Audience:** ENG. DONIA — Data Analysis Evaluation Committee
-
 ---
 
 ## Phase 1 — SQL Storytelling
